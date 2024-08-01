@@ -10,7 +10,7 @@ inicial com alguns dados.
 
 ## Requisitos projeto
 
-Todas as premissas e e o sumário com o que deve ser feito está no "Documento de Requesitos DSCommerce.pdf". 
+Todas as premissas e o sumário com o que deve ser feito está no "Documento de Requesitos DSCommerce.pdf". 
 Como é algo específico do curso, não colocarei o link, mas você pode adquirir no site [devsuperior]().
 
 ## UML
@@ -22,8 +22,8 @@ Como é algo específico do curso, não colocarei o link, mas você pode adquiri
 A ideia é sempre começar por uma entidade independente. Para detectar isso, olhamos no diagrama as entidades que estão
 nas pontas, como User, Payment. Mas no outro lado dela (no relacionamento), tem que estar o "muitos", não pode ter "um".
 
-Por exemplo, no "User", na sua linha de relacionamento, do outro lado é um "muitos", ou seja, o User é independente,
-pode ser iniciado sem colocar o pedido.
+Por exemplo, no "User". Na sua linha de relacionamento, do outro lado é um "muitos" (no caso, o orders ali), ou seja, o 
+User é independente, podendo ser iniciado sem colocar o pedido.
 
 Outra entidade válida para ser iniciado primeiro, poderia também ser a "Category".
 
@@ -165,7 +165,7 @@ Na entidade Product:
     private Set<Category> categories = new HashSet<>();
 ```
 
-O JoinTable criará uma tabela do meio, auxiliar ou de associação. Nela, passamos a referência para as duas chaves 
+O JoinTable criará uma tabela do meio (auxiliar/associação). Nela, passamos a referência para as duas chaves 
 estrangeiras. 
 
 Passamos o JoinClumns para o product_id e o InverseJoinColumns (do outro lado), a category_id.
@@ -181,8 +181,8 @@ Na entidade Category:
 
 Aqui é somente o mapeamento de como essa entidade (Category), foi mapeada na outra classe (Product).
 
-Além disso, iremos ao JPA que a coluna "description", será uma coluna com vários caracteres. Usaremos o @Column, 
-passando:
+Além disso, iremos ao JPA que a coluna "description", será uma coluna com vários caracteres. Usaremos o @Column na
+entidade User, passando:
 ```java
     @Column(columnDefinition = "TEXT")
     private String description;
@@ -196,6 +196,142 @@ Por fim, configuraremos outros campos unicos, como email, por exemplo.
     private String email;
 ```
 
+**Ao rodar o código:**
+
+Tabela auxiliar criada:
+
+![img_5.png](img_5.png)
+
+## Mapeamento Muitos-para-muitos com classe de associação, parte 1
+
+Ao analisar o diagrama, notamos que o relacionamento entre product e order é muitos para muitos e, além disso, possui
+uma classe de associação (OrderItem).
+
+**Isso acontece numa situação parecida com a de cima. A diferença é que a tabela auxiliar terá mais dados do que somente
+as da chave estrangeira.**
+
+### Como mapear uma classe de associação?
+
+Bom, ela terá uma chave múltipla primária. Ou seja, dentro da nossa tabela de OrderItem no banco de dados, vai ter uma
+chave estrangeira para o **ID do produto** e para o **ID da order**. Como as duas chaves estrangeiras são primárias,
+temos um caso de **CHAVE COMPOSTA (EMBEDDED KEY)**.
+
+### Chave Composta (Embedded Key)
+
+Quando temos uma chave primária composta no banco relacional para mapearmos ela para o java (JPA), teremos que criar
+uma classe a parte para representar essa chave primária, veja:
+
+```java
+//anotação para dizer que essa classe será incorporada por outras
+@Embeddable
+public class OrderItemPK {
+
+    @ManyToOne
+    @JoinColumn(name = "order_id")
+    private Order order;
+
+    @ManyToOne
+    @JoinColumn(name = "product_id")
+    private Product product;
+}
+```
+
+Agora, na nossa classe OrderItem (que terá preço e quantidade), instanciaremos a classe auxiliar criada aima uma ID, 
+veja:
+
+```java
+public class OrderItem {
+    
+    //usando a classe como referência, instanciando-a
+    @EmbeddedId
+    private OrderItemPK id = new OrderItemPK();
+}
+```
+
+❗Importante. Não esquecer de ao instanciar o construtor na classe OrderItem, trocar os parâmetros. Não faz sentido
+expormos no construtor a OrderItemPK. 
+
+Se outra classe precisa instanciar a OrderItem, ela não precisa (e nem deve), conhecer artícios internos da JPA.
+Portanto, o construtor terá: order e product, veja:
+
+```java
+    public OrderItem(Order order, Product product, Integer quantity, Double price) {
+        id.setOrder(order);
+        id.setProduct(product);
+        this.quantity = quantity;
+        this.price = price;
+    }
+```
+
+Dentro do construtor, nós chamados o id (que está na classe OrderItem, mas inicialmente é da OrderItemPK), settando
+seu Order e Product.
+
+❗Importante. Dentro da classe **Order** e da classe **Product** podemos ter referência para os itens. Por exemplo:
+Dentro do Product, usar um "getItems" e acessar os OrderItems associados a ele? Sim! Veja:
+
+Classe Product: Importamos uma coleção de OrdemItem. E devemos lembrar o seguinte: Na classe do OrdemItem, temos o
+id que é uma OrderItemPK. Dentro da OrderItemPK, temos a anotação ManyToOne. Dito isso, passaremos a anotação OneToMany
+na coleção de OrderItem dentro de Product.
+```java
+    //O mapeamento é feito diferente. O Product que estamos nos referindo,
+    // está dentro do OrderItemPK, que este, por sua vez, está dentro de OrderItem
+    // como "id". Usamod o id e o "." para entrar na classe, selecionando o product
+    @OneToMany(mappedBy = "id.product")
+    private Set<OrderItem> items = new HashSet<>();
+```
+
+Classe Order: Faremos a mesma coisa acima.
+
+```java
+    @OneToMany(mappedBy = "id.order")
+    private Set<OrderItem> items = new HashSet<>();
+```
+
+**Ao rodar o código:**
+
+Tabela auxiliar OrderItem agora possui referência para o category_id e product_id.
+
+![img_6.png](img_6.png)
+
+## Mapeamento Muitos-para-muitos com classe de associação, parte 2
+
+Na classe Order nós podemos ter um getProducts e na classe Product um getOrders. Isso é util em um cenário em que
+gostariamos de ver, quais produtos estão em um pedido, por exemplo, ou vice-versa. Veja:
+
+Na classe Order:
+```java
+    public Set<OrderItem> getItems() {
+        return items;
+    }
+    public List<Product> getProducts() {
+        return items.stream().map(OrderItem::getProduct).toList();
+    }   
+```
+
+Aqui, nós pegamos o Set de Items do tipo OrderItem, e através do Map, transformamos eles em um Product.
+
+Na classe Product:
+```java
+    public Set<OrderItem> getItems() {
+        return items;
+    }
+
+    public List<Order> orders() {
+        return items.stream().map(OrderItem::getOrder).toList();
+    }
+```
+
+## Seeding da base de dados
+
+Daremos uma carga inicial de dados quando a aplicação rodar.
+
+Na pasta resources: criar um arquivo import.sql, contendo [isso.](https://gist.github.com/acenelio/664c3508edd4d418d566ed86179fdf8b)
+
+## Gerando equals e hashCode das entidades
+
+Colocaremos equals e hashCode em cada entidade. Caso a gente precise comparar uma com a outra, será possível.
+
+Compararemos tudo por ID.
 
 <hr>
 Spring JPA - Subframework que auxilia a implementar acesso a dado a banco de dado relacional.
